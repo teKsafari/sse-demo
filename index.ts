@@ -8,29 +8,21 @@ import type { ServerResponse, IncomingMessage } from "http";
 // --- Config ---
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8888;
-const HEARTBEAT_INTERVAL = 20_000; // 20s — keeps proxies/load balancers from closing idle connections
 const htmlCanvas = readFileSync(join(__dirname, "index.html"), "utf-8");
 
 // --- State ---
 const clients = new Map<string, ServerResponse>();
 const generateId = () => randomBytes(3).toString("hex").slice(0, 5);
 
-/** Remove a client and clear its heartbeat timer */
 function removeClient(id: string) {
-  const res = clients.get(id);
-  if (!res) return;
-  clearInterval((res as any).__heartbeat);
   clients.delete(id);
 }
 
 // --- App ---
 const app = Fastify({
-  logger: {
-    transport: {
-      target: "pino-pretty",
-      options: { colorize: true },
-    },
-  },
+  logger: process.env.VERCEL
+    ? true
+    : { transport: { target: "pino-pretty", options: { colorize: true } } },
 });
 
 app.get("/", async (_req, reply) => {
@@ -40,7 +32,6 @@ app.get("/", async (_req, reply) => {
 app.get("/stream", (req, reply) => {
   const id = generateId();
 
-  // Prevent Fastify from auto-closing the response after the handler returns
   reply.hijack();
 
   reply.raw.writeHead(200, {
@@ -51,14 +42,6 @@ app.get("/stream", (req, reply) => {
 
   // Send initial event with the assigned client ID
   reply.raw.write(`event: connected\ndata: ${JSON.stringify({ clientId: id })}\n\n`);
-
-  // Heartbeat: SSE comment to keep connection alive through proxies
-  const heartbeat = setInterval(() => {
-    reply.raw.write(": ping\n\n");
-  }, HEARTBEAT_INTERVAL);
-
-  // Stash the timer on the response so removeClient can clear it
-  (reply.raw as any).__heartbeat = heartbeat;
 
   clients.set(id, reply.raw);
   app.log.info({ clientId: id, ip: req.ip, total: clients.size }, "SSE client connected");
