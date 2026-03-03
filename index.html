@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSE Client</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    textarea {
+      width: 100%;
+      height: 150px;
+      font-family: monospace;
+      font-size: 14px;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      overflow-x: auto;
+      cursor: pointer;
+      position: relative;
+    }
+    pre:hover {
+      background: #e8e8e8;
+    }
+    pre:active::after {
+      content: "Copied!";
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      font-size: 11px;
+      color: #555;
+    }
+    h3 { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <h1>SSE Stream</h1>
+  <p>Your Client ID: <strong id="clientId">connecting...</strong></p>
+  <form id="form">
+    <input id="target" type="text" placeholder="Target client ID (blank = all)" autocomplete="off" style="width: 200px; padding: 8px; font-size: 14px; margin-right: 4px;">
+    <input id="input" type="text" placeholder="Type a message..." autocomplete="off" style="width: calc(100% - 290px); padding: 8px; font-size: 14px;">
+    <button type="submit" style="padding: 8px 16px; font-size: 14px;">Send</button>
+  </form>
+  <br>
+  <textarea id="output" readonly></textarea>
+  <script>
+    const output = document.getElementById("output");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const target = document.getElementById("target");
+    const clientIdEl = document.getElementById("clientId");
+    const sse = new EventSource("/stream");
+
+    sse.addEventListener("connected", (event) => {
+      const { clientId } = JSON.parse(event.data);
+      clientIdEl.textContent = clientId;
+    });
+
+    sse.onmessage = (event) => {
+      output.value += event.data + "\n";
+      output.scrollTop = output.scrollHeight;
+    };
+
+    sse.onerror = () => {
+      output.value += "[connection lost]\n";
+    };
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const data = input.value.trim();
+      if (!data) return;
+      const body = { data };
+      const clientId = target.value.trim();
+      if (clientId) body.clientId = clientId;
+      await fetch("/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      input.value = "";
+    });
+  </script>
+
+  <hr>
+  <h2>API Reference</h2>
+  <p style="color: #888; font-size: 13px;">Click any command below to copy it to your clipboard.</p>
+
+  <h3>Send to all clients</h3>
+  <pre id="cmd-send-all"></pre>
+
+  <h3>Send to a specific client (you)</h3>
+  <pre id="cmd-send-one"></pre>
+
+  <h3>List connected clients</h3>
+  <pre id="cmd-list"></pre>
+
+  <h3>Listen to SSE stream</h3>
+  <pre id="cmd-stream"></pre>
+
+  <script>
+    const base = window.location.origin;
+    let myId = "YOUR_CLIENT_ID";
+
+    function updateCmds() {
+      document.getElementById("cmd-send-all").textContent =
+        `curl -X POST ${base}/send \\\n  -H "Content-Type: application/json" \\\n  -d '{"data": "hello everyone"}'`;
+      document.getElementById("cmd-send-one").textContent =
+        `curl -X POST ${base}/send \\\n  -H "Content-Type: application/json" \\\n  -d '{"data": "hello you", "clientId": "${myId}"}'`;
+      document.getElementById("cmd-list").textContent =
+        `curl ${base}/clients`;
+      document.getElementById("cmd-stream").textContent =
+        `curl -N ${base}/stream`;
+    }
+
+    // Update when client ID is assigned
+    const origConnected = sse.listeners?.connected;
+    sse.addEventListener("connected", (event) => {
+      myId = JSON.parse(event.data).clientId;
+      updateCmds();
+    });
+
+    document.querySelectorAll("pre[id^='cmd-']").forEach(el => {
+      el.addEventListener("click", () => navigator.clipboard.writeText(el.textContent));
+    });
+
+    updateCmds();
+  </script>
+</body>
+</html>
