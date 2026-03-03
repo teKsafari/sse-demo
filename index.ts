@@ -24,7 +24,14 @@ function removeClient(id: string) {
 }
 
 // --- App ---
-const app = Fastify();
+const app = Fastify({
+  logger: {
+    transport: {
+      target: "pino-pretty",
+      options: { colorize: true },
+    },
+  },
+});
 
 app.get("/", async (_req, reply) => {
   reply.type("text/html").send(htmlCanvas);
@@ -54,9 +61,13 @@ app.get("/stream", (req, reply) => {
   (reply.raw as any).__heartbeat = heartbeat;
 
   clients.set(id, reply.raw);
+  app.log.info({ clientId: id, ip: req.ip, total: clients.size }, "SSE client connected");
 
   // Detect disconnects from all possible sources
-  const cleanup = () => removeClient(id);
+  const cleanup = () => {
+    removeClient(id);
+    app.log.info({ clientId: id, total: clients.size }, "SSE client disconnected");
+  };
   reply.raw.on("close", cleanup);
   reply.raw.on("error", cleanup);
   req.raw.on("aborted", cleanup);
@@ -92,6 +103,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 // --- Local dev ---
 if (!process.env.VERCEL) {
   app.listen({ port: PORT, host: "0.0.0.0" }).then(() => {
-    console.log(`Listening on ${PORT}`);
+    app.log.info(`Listening on ${PORT}`);
   });
 }
